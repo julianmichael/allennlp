@@ -285,6 +285,33 @@ def train_model(params: Params,
                                   trainer_params)
 
     evaluate_on_test = params.pop_bool("evaluate_on_test", False)
+    ########## SUPER HACKY PRETRAIN STUFF ###############
+
+    pretrained_model = params.pop('pretrained_model', None)
+    pretrained_fixed = params.pop('pretrained_fixed', False)
+    if pretrained_model is not None:
+        from allennlp.models.archival import load_archive
+        archive = load_archive(pretrained_model, trainer._cuda_devices[0])
+        loaded_model = archive.model
+        loaded_vocab = archive.model.vocab
+
+        model_params = dict(model.named_parameters())
+        for name, loaded_p in loaded_model.named_parameters():
+            if name in model_params:
+                if name == "text_field_embedder.token_embedder_tokens.weight":
+                    model_params[name].data[0].copy_(loaded_p.data[0])
+                    model_params[name].data[1].copy_(loaded_p.data[1])
+                    for i, t in loaded_vocab.get_index_to_token_vocabulary("tokens").items():
+                        model_index = model.vocab.get_token_index(t, namespace="tokens")
+                        if model_index > 1:
+                            model_params[name].data[model_index].copy_(loaded_p.data[i])
+                else:
+                    model_params[name].data.copy_(loaded_p.data)
+
+                if pretrained_fixed:
+                    model_params[name].requires_grad = False
+
+    #####################################################
     params.assert_empty('base train command')
 
     try:
